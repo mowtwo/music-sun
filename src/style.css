@@ -1,0 +1,144 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #3B1568;
+  transition: background 0.8s ease;
+}
+
+canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+#top-bar {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+#top-bar button,
+#top-bar label {
+  padding: 10px 22px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 30px;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 15px;
+  cursor: pointer;
+  backdrop-filter: blur(12px);
+  transition: background 0.3s, border-color 0.3s;
+  white-space: nowrap;
+}
+
+#top-bar button:hover,
+#top-bar label:hover {
+  background: rgba(0, 0, 0, 0.5);
+  border-color: rgba(255, 255, 255, 0.45);
+}
+
+#file-input {
+  display: none;
+}
+
+/* Bottom dock: dark frosted glass panel behind controls */
+#bottom-dock {
+  position: fixed;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9;
+  width: 420px;
+  max-width: 92vw;
+  padding: 18px 24px 22px;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(16px);
+  border-radius: 20px 20px 0 0;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: none;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
+#site-title {
+  color: rgba(255, 255, 255, 0.35);
+  font-size: 12px;
+  letter-spacing: 4px;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+#controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+#controls button {
+  padding: 8px 20px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 20px;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 15px;
+  cursor: pointer;
+  transition: background 0.3s;
+}
+
+#controls button:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+#speed-display {
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 13px;
+  min-width: 36px;
+  text-align: center;
+}
+
+#progress-bar {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+#progress-bar input[type="range"] {
+  flex: 1;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+
+#progress-bar input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.85);
+  cursor: pointer;
+}
+
+#progress-time {
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 12px;
+  white-space: nowrap;
+}
