@@ -627,6 +627,11 @@ resize()
 // Audio Init
 // ============================================================
 function initAudio(src: string, isDemo: boolean) {
+  // Disconnect old source from recording dest (if recording)
+  if (source && audioDest) {
+    try { source.disconnect(audioDest) } catch (_) { /* */ }
+  }
+
   if (audioElement) {
     audioElement.pause()
     audioElement.src = ''
@@ -635,7 +640,12 @@ function initAudio(src: string, isDemo: boolean) {
 
   isDemoTrack = isDemo
 
-  audioContext = new AudioContext()
+  // Reuse existing AudioContext if we have one (critical for recording continuity)
+  if (!audioContext || audioContext.state === 'closed') {
+    audioContext = new AudioContext()
+  }
+
+  // Recreate analyser on same context
   analyser = audioContext.createAnalyser()
   analyser.fftSize = 256
   analyser.smoothingTimeConstant = 0.75
@@ -647,6 +657,11 @@ function initAudio(src: string, isDemo: boolean) {
   source = audioContext.createMediaElementSource(audioElement)
   source.connect(analyser)
   analyser.connect(audioContext.destination)
+
+  // If recording, connect new source to the existing recording dest
+  if (isRecording && audioDest) {
+    source.connect(audioDest)
+  }
 
   frequencyData = new Uint8Array(analyser.frequencyBinCount)
 
@@ -665,16 +680,26 @@ function initAudio(src: string, isDemo: boolean) {
   }
 
   bottomDock.style.display = 'flex'
-  playBtn.textContent = 'Play'
   playbackRate = 1.0
   speedDisplay.textContent = '1x'
   progressSlider.value = '0'
-  isPlaying = false
+
+  // If recording, auto-play the new track seamlessly
+  if (isRecording) {
+    if (audioContext.state === 'suspended') audioContext.resume()
+    audioElement.play()
+    isPlaying = true
+    startTime = performance.now()
+    playBtn.textContent = 'Pause'
+  } else {
+    playBtn.textContent = 'Play'
+    isPlaying = false
+  }
 
   audioElement.addEventListener('ended', () => {
     isPlaying = false
     playBtn.textContent = 'Play'
-    if (isRecording) stopRecording()
+    // Don't stop recording on track end — user may switch to another track
   })
 }
 
