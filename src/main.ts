@@ -40,6 +40,7 @@ fileLabel.htmlFor = 'file-input'
 fileLabel.textContent = 'Choose Audio File'
 
 const demoBtn = document.createElement('button')
+demoBtn.id = 'demo-btn'
 demoBtn.textContent = 'Demo Music'
 
 const recordBtn = document.createElement('button')
@@ -449,18 +450,110 @@ function setFavicon(dataUri: string) {
 // ============================================================
 // Frequency fingerprint detection
 // ============================================================
-// We sample the first few seconds of audio and build a frequency
-// profile. The demo track has a distinctive signature — heavy
-// low-mid energy with specific spectral shape. We compare using
-// cosine similarity on the spectral centroid + band energy ratios.
+// On app load, silently decode the demo track via OfflineAudioContext
+// to pre-compute a reference fingerprint. User-uploaded tracks are
+// probed for 5 seconds and compared using cosine similarity.
+
 let probeFrames: number[][] = []
 let probeTimer: number | null = null
 let hasDecidedMode = false
 
+/** Reference fingerprint (averaged spectrum) from the demo track */
+let demoFingerprint: Float32Array | null = null
+
+const FINGERPRINT_CACHE_KEY = 'music-sun-demo-fingerprint'
+
+function saveFingerprintToCache(fp: Float32Array) {
+  try {
+    localStorage.setItem(FINGERPRINT_CACHE_KEY, JSON.stringify(Array.from(fp)))
+  } catch (_) { /* quota exceeded or private mode */ }
+}
+
+function loadFingerprintFromCache(): Float32Array | null {
+  try {
+    const raw = localStorage.getItem(FINGERPRINT_CACHE_KEY)
+    if (!raw) return null
+    const arr = JSON.parse(raw) as number[]
+    return new Float32Array(arr)
+  } catch (_) { return null }
+}
+
+// --- Load cached fingerprint or compute in background ---
+;(async () => {
+  const cached = loadFingerprintFromCache()
+  if (cached && cached.length > 0) {
+    demoFingerprint = cached
+    return
+  }
+
+  try {
+    const res = await fetch(import.meta.env.BASE_URL + 'YA1OvUaoVuc.mp3')
+    const arrayBuf = await res.arrayBuffer()
+    const tmpCtx = new AudioContext()
+    const decoded = await tmpCtx.decodeAudioData(arrayBuf)
+    const sampleRate = decoded.sampleRate
+    const duration = Math.min(5, decoded.duration)
+    const frames = Math.ceil(duration * sampleRate)
+
+    const offline = new OfflineAudioContext(decoded.numberOfChannels, frames, sampleRate)
+    const offSrc = offline.createBufferSource()
+    offSrc.buffer = decoded
+    const offAnalyser = offline.createAnalyser()
+    offAnalyser.fftSize = 256
+    offAnalyser.smoothingTimeConstant = 0.75
+    offSrc.connect(offAnalyser)
+    offAnalyser.connect(offline.destination)
+    offSrc.start(0)
+
+    const binCount = offAnalyser.frequencyBinCount
+    const snapshots: number[][] = []
+    const interval = 0.05
+    for (let t = interval; t < duration; t += interval) {
+      offline.suspend(t).then(() => {
+        const buf = new Uint8Array(binCount)
+        offAnalyser.getByteFrequencyData(buf)
+        snapshots.push(Array.from(buf))
+        offline.resume()
+      })
+    }
+
+    await offline.startRendering()
+    await tmpCtx.close()
+
+    if (snapshots.length >= 10) {
+      demoFingerprint = computeAverageSpectrum(snapshots)
+      saveFingerprintToCache(demoFingerprint)
+    }
+  } catch (e) {
+    console.warn('Demo fingerprint pre-compute failed:', e)
+  }
+})()
+const PROBE_DURATION = 5000   // 5 seconds of sampling
+const SIMILARITY_THRESHOLD = 0.985  // very strict cosine similarity
+
+function computeAverageSpectrum(frames: number[][]): Float32Array {
+  const len = frames[0].length
+  const avg = new Float32Array(len)
+  for (const frame of frames) {
+    for (let i = 0; i < len; i++) avg[i] += frame[i]
+  }
+  for (let i = 0; i < len; i++) avg[i] /= frames.length
+  return avg
+}
+
+function cosineSimilarity(a: Float32Array, b: Float32Array): number {
+  let dot = 0, magA = 0, magB = 0
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i]
+    magA += a[i] * a[i]
+    magB += b[i] * b[i]
+  }
+  return dot / (Math.sqrt(magA) * Math.sqrt(magB) + 1e-10)
+}
+
 function startProbing() {
   probeFrames = []
   hasDecidedMode = false
-  // Collect frequency snapshots over 2 seconds
   const collectFrame = () => {
     if (!analyser || !frequencyData) return
     analyser.getByteFrequencyData(frequencyData)
@@ -470,7 +563,7 @@ function startProbing() {
   setTimeout(() => {
     if (probeTimer) clearInterval(probeTimer)
     decideMode()
-  }, 2000)
+  }, PROBE_DURATION)
 }
 
 function decideMode() {
@@ -482,43 +575,16 @@ function decideMode() {
     return
   }
 
-  if (probeFrames.length < 5) {
+  // Not enough probe data or fingerprint not ready yet
+  if (!demoFingerprint || probeFrames.length < 10) {
     pickRandomAltTheme()
     return
   }
 
-  // Compute average spectrum
-  const len = probeFrames[0].length
-  const avg = new Float32Array(len)
-  for (const frame of probeFrames) {
-    for (let i = 0; i < len; i++) avg[i] += frame[i]
-  }
-  for (let i = 0; i < len; i++) avg[i] /= probeFrames.length
+  const userSpectrum = computeAverageSpectrum(probeFrames)
+  const similarity = cosineSimilarity(demoFingerprint, userSpectrum)
 
-  // Band energy ratios (low / mid / high)
-  const third = Math.floor(len / 3)
-  let lowE = 0, midE = 0, highE = 0
-  for (let i = 0; i < third; i++) lowE += avg[i]
-  for (let i = third; i < third * 2; i++) midE += avg[i]
-  for (let i = third * 2; i < len; i++) highE += avg[i]
-  const total = lowE + midE + highE + 0.001
-
-  const lowRatio = lowE / total
-  const midRatio = midE / total
-
-  // The demo track signature: strong low-mid energy, low-mid ratio > 0.7
-  // and a specific spectral centroid range
-  let centroid = 0
-  let energy = 0
-  for (let i = 0; i < len; i++) {
-    centroid += i * avg[i]
-    energy += avg[i]
-  }
-  centroid /= (energy + 0.001)
-  const normalizedCentroid = centroid / len
-
-  // Match: heavy low-mid, centroid in lower range
-  if (lowRatio + midRatio > 0.72 && normalizedCentroid < 0.35) {
+  if (similarity >= SIMILARITY_THRESHOLD) {
     applyTheme('sun', '#0000C8', faviconSun)
   } else {
     pickRandomAltTheme()
