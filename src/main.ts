@@ -1,6 +1,24 @@
 import './style.css'
 
 // ============================================================
+// Mobile Guard — block mobile devices (captureStream / MediaRecorder unsupported)
+// ============================================================
+const isMobile = /Android|iPhone|iPad|iPod|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+  || (navigator.maxTouchPoints > 1 && !matchMedia('(pointer:fine)').matches)
+
+if (isMobile) {
+  document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
+    <div id="mobile-block">
+      <div class="mobile-block-icon">🖥️</div>
+      <h2>请使用电脑访问</h2>
+      <p>本应用依赖 Canvas 录制与 Web Audio 等桌面端特性，暂不支持移动设备。</p>
+      <p class="mobile-block-hint">Please visit on a desktop browser.</p>
+    </div>
+  `
+  throw new Error('Mobile device detected — app halted.')
+}
+
+// ============================================================
 // DOM Setup
 // ============================================================
 const app = document.querySelector<HTMLDivElement>('#app')!
@@ -24,8 +42,17 @@ fileLabel.textContent = 'Choose Audio File'
 const demoBtn = document.createElement('button')
 demoBtn.textContent = 'Demo Music'
 
-topBar.append(fileLabel, fileInput, demoBtn)
+const recordBtn = document.createElement('button')
+recordBtn.id = 'record-btn'
+recordBtn.textContent = 'Record'
+
+topBar.append(fileLabel, fileInput, demoBtn, recordBtn)
 app.appendChild(topBar)
+
+const recordStatus = document.createElement('div')
+recordStatus.id = 'record-status'
+recordStatus.innerHTML = '<span class="rec-dot"></span><span id="rec-time">REC 0:00</span>'
+app.appendChild(recordStatus)
 
 // Bottom dock (frosted glass panel)
 const bottomDock = document.createElement('div')
@@ -78,6 +105,231 @@ let analyser: AnalyserNode | null = null
 let source: MediaElementAudioSourceNode | null = null
 let audioElement: HTMLAudioElement | null = null
 let frequencyData: Uint8Array<ArrayBuffer> | null = null
+let audioDest: MediaStreamAudioDestinationNode | null = null
+
+// ============================================================
+// Recording
+// ============================================================
+let mediaRecorder: MediaRecorder | null = null
+let recordChunks: Blob[] = []
+let isRecording = false
+let recordStartTime = 0
+let recTimeEl: HTMLElement | null = null
+let lastRecordedBlob: Blob | null = null
+let lastRecordedMime = 'video/webm'
+
+// --- Preview modal ---
+const previewOverlay = document.createElement('div')
+previewOverlay.id = 'preview-overlay'
+
+const previewModal = document.createElement('div')
+previewModal.id = 'preview-modal'
+
+const previewVideo = document.createElement('video')
+previewVideo.controls = true
+
+const previewActions = document.createElement('div')
+previewActions.id = 'preview-actions'
+
+const downloadWebmBtn = document.createElement('button')
+downloadWebmBtn.textContent = 'Download WebM'
+
+const convertMp4Btn = document.createElement('button')
+convertMp4Btn.textContent = 'Convert to MP4'
+
+const convertProgress = document.createElement('span')
+convertProgress.id = 'convert-progress'
+
+const closePreviewBtn = document.createElement('button')
+closePreviewBtn.textContent = 'Close'
+closePreviewBtn.id = 'close-preview-btn'
+
+previewActions.append(downloadWebmBtn, convertMp4Btn, convertProgress, closePreviewBtn)
+previewModal.append(previewVideo, previewActions)
+previewOverlay.appendChild(previewModal)
+app.appendChild(previewOverlay)
+
+function showPreview(blob: Blob) {
+  lastRecordedBlob = blob
+  const url = URL.createObjectURL(blob)
+  previewVideo.src = url
+  previewOverlay.style.display = 'flex'
+  convertProgress.textContent = ''
+  convertMp4Btn.disabled = false
+  convertMp4Btn.textContent = 'Convert to MP4'
+}
+
+function hidePreview() {
+  previewOverlay.style.display = 'none'
+  previewVideo.pause()
+  previewVideo.src = ''
+}
+
+closePreviewBtn.addEventListener('click', hidePreview)
+previewOverlay.addEventListener('click', (e) => {
+  if (e.target === previewOverlay) hidePreview()
+})
+
+downloadWebmBtn.addEventListener('click', () => {
+  if (!lastRecordedBlob) return
+  const url = URL.createObjectURL(lastRecordedBlob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `music-sun-${Date.now()}.webm`
+  a.click()
+  URL.revokeObjectURL(url)
+})
+
+convertMp4Btn.addEventListener('click', async () => {
+  if (!lastRecordedBlob) return
+  convertMp4Btn.disabled = true
+  convertMp4Btn.textContent = 'Converting...'
+  convertProgress.textContent = 'Loading FFmpeg...'
+
+  try {
+    const { FFmpeg } = await import('@ffmpeg/ffmpeg')
+    const { fetchFile } = await import('@ffmpeg/util')
+
+    const ffmpeg = new FFmpeg()
+    ffmpeg.on('progress', ({ progress }) => {
+      const pct = Math.round(Math.max(0, Math.min(1, progress)) * 100)
+      convertProgress.textContent = `${pct}%`
+    })
+
+    // Use multi-threaded core for faster encoding
+    const useMultiThread = typeof SharedArrayBuffer !== 'undefined'
+    if (useMultiThread) {
+      // Worker scripts can't be loaded cross-origin directly — fetch and wrap in blob URL
+      const workerRes = await fetch('https://unpkg.com/@ffmpeg/core-mt@0.12.10/dist/esm/ffmpeg-core.worker.js')
+      const workerBlob = new Blob([await workerRes.text()], { type: 'text/javascript' })
+      const workerURL = URL.createObjectURL(workerBlob)
+      await ffmpeg.load({
+        coreURL: 'https://unpkg.com/@ffmpeg/core-mt@0.12.10/dist/esm/ffmpeg-core.js',
+        wasmURL: 'https://unpkg.com/@ffmpeg/core-mt@0.12.10/dist/esm/ffmpeg-core.wasm',
+        workerURL,
+      })
+    } else {
+      await ffmpeg.load({
+        coreURL: 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm/ffmpeg-core.js',
+        wasmURL: 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm/ffmpeg-core.wasm',
+      })
+    }
+
+    convertProgress.textContent = 'Converting...'
+    await ffmpeg.writeFile('input.webm', await fetchFile(lastRecordedBlob))
+    await ffmpeg.exec([
+      '-i', 'input.webm',
+      '-c:v', 'libx264',
+      '-preset', 'ultrafast',
+      '-tune', 'fastdecode',
+      '-crf', '28',
+      ...(useMultiThread ? ['-threads', '4'] : []),
+      '-c:a', 'aac',
+      '-b:a', '128k',
+      '-movflags', '+faststart',
+      'output.mp4',
+    ])
+
+    const data = await ffmpeg.readFile('output.mp4') as Uint8Array
+    const mp4Blob = new Blob([data.buffer as ArrayBuffer], { type: 'video/mp4' })
+    const url = URL.createObjectURL(mp4Blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `music-sun-${Date.now()}.mp4`
+    a.click()
+    URL.revokeObjectURL(url)
+
+    convertProgress.textContent = 'Done!'
+    convertMp4Btn.textContent = 'Convert to MP4'
+    convertMp4Btn.disabled = false
+  } catch (err) {
+    console.error('FFmpeg conversion failed:', err)
+    convertProgress.textContent = 'Failed'
+    convertMp4Btn.textContent = 'Retry'
+    convertMp4Btn.disabled = false
+  }
+})
+
+// --- Recording controls ---
+function startRecording() {
+  if (!audioContext || !source) return
+
+  const videoStream = canvas.captureStream(60)
+  audioDest = audioContext.createMediaStreamDestination()
+  source.connect(audioDest)
+
+  const combined = new MediaStream([
+    ...videoStream.getVideoTracks(),
+    ...audioDest.stream.getAudioTracks()
+  ])
+
+  lastRecordedMime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
+    ? 'video/webm;codecs=vp9,opus'
+    : 'video/webm'
+
+  mediaRecorder = new MediaRecorder(combined, { mimeType: lastRecordedMime, videoBitsPerSecond: 5_000_000 })
+  recordChunks = []
+
+  mediaRecorder.ondataavailable = (e) => {
+    if (e.data.size > 0) recordChunks.push(e.data)
+  }
+
+  mediaRecorder.onstop = () => {
+    const blob = new Blob(recordChunks, { type: lastRecordedMime })
+
+    // Disconnect recording audio dest
+    if (audioDest && source) {
+      try { source.disconnect(audioDest) } catch (_) { /* */ }
+      audioDest = null
+    }
+
+    // Pause audio playback
+    if (audioElement && isPlaying) {
+      audioElement.pause()
+      isPlaying = false
+      playBtn.textContent = 'Play'
+    }
+
+    showPreview(blob)
+  }
+
+  mediaRecorder.start(100)
+  isRecording = true
+  recordStartTime = performance.now()
+  recordBtn.textContent = 'Stop'
+  recordBtn.classList.add('recording')
+  recordStatus.style.display = 'flex'
+  recTimeEl = document.getElementById('rec-time')
+
+  // Auto-play if not already playing
+  if (audioElement && !isPlaying) {
+    if (audioContext!.state === 'suspended') audioContext!.resume()
+    audioElement.play()
+    isPlaying = true
+    startTime = performance.now()
+    playBtn.textContent = 'Pause'
+    if (!hasDecidedMode && !isDemoTrack) startProbing()
+  }
+}
+
+function stopRecording() {
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    mediaRecorder.stop()
+  }
+  isRecording = false
+  recordBtn.textContent = 'Record'
+  recordBtn.classList.remove('recording')
+  recordStatus.style.display = 'none'
+}
+
+recordBtn.addEventListener('click', () => {
+  if (!audioContext || !source) return
+  if (isRecording) {
+    stopRecording()
+  } else {
+    startRecording()
+  }
+})
 
 // ============================================================
 // State
@@ -356,6 +608,7 @@ function initAudio(src: string, isDemo: boolean) {
   audioElement.addEventListener('ended', () => {
     isPlaying = false
     playBtn.textContent = 'Play'
+    if (isRecording) stopRecording()
   })
 }
 
@@ -365,7 +618,7 @@ fileInput.addEventListener('change', () => {
 })
 
 demoBtn.addEventListener('click', () => {
-  initAudio('/YA1OvUaoVuc.mp3', true)
+  initAudio(import.meta.env.BASE_URL + 'YA1OvUaoVuc.mp3', true)
 })
 
 playBtn.addEventListener('click', () => {
@@ -659,6 +912,12 @@ function draw(now: number) {
   if (audioElement && audioElement.duration && !isSeeking) {
     progressSlider.value = String((audioElement.currentTime / audioElement.duration) * 1000)
     progressTime.textContent = formatTime(audioElement.currentTime) + ' / ' + formatTime(audioElement.duration)
+  }
+
+  // Update recording timer
+  if (isRecording && recTimeEl) {
+    const recElapsed = (now - recordStartTime) / 1000
+    recTimeEl.textContent = 'REC ' + formatTime(recElapsed)
   }
 
   // Get frequency data
