@@ -77,7 +77,7 @@ let audioContext: AudioContext | null = null
 let analyser: AnalyserNode | null = null
 let source: MediaElementAudioSourceNode | null = null
 let audioElement: HTMLAudioElement | null = null
-let frequencyData: Uint8Array | null = null
+let frequencyData: Uint8Array<ArrayBuffer> | null = null
 
 // ============================================================
 // State
