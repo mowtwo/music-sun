@@ -39,15 +39,11 @@ const fileLabel = document.createElement('label')
 fileLabel.htmlFor = 'file-input'
 fileLabel.textContent = 'Choose Audio File'
 
-const demoBtn = document.createElement('button')
-demoBtn.id = 'demo-btn'
-demoBtn.textContent = 'Demo Music'
-
 const recordBtn = document.createElement('button')
 recordBtn.id = 'record-btn'
 recordBtn.textContent = 'Record'
 
-topBar.append(fileLabel, fileInput, demoBtn, recordBtn)
+topBar.append(fileLabel, fileInput, recordBtn)
 app.appendChild(topBar)
 
 const recordStatus = document.createElement('div')
@@ -59,9 +55,22 @@ app.appendChild(recordStatus)
 const bottomDock = document.createElement('div')
 bottomDock.id = 'bottom-dock'
 
+const siteTitleWrap = document.createElement('div')
+siteTitleWrap.id = 'site-title-wrap'
+
 const siteTitle = document.createElement('div')
 siteTitle.id = 'site-title'
 siteTitle.textContent = '智慧音频可视化'
+
+const easterEggBtn = document.createElement('button')
+easterEggBtn.id = 'easter-egg-btn'
+easterEggBtn.textContent = '♪'
+easterEggBtn.title = 'Demo Music'
+
+const easterEggToast = document.createElement('div')
+easterEggToast.id = 'easter-egg-toast'
+
+siteTitleWrap.append(siteTitle, easterEggBtn)
 
 const controls = document.createElement('div')
 controls.id = 'controls'
@@ -90,8 +99,9 @@ progressTime.id = 'progress-time'
 progressTime.textContent = '0:00 / 0:00'
 progressBar.append(progressSlider, progressTime)
 
-bottomDock.append(siteTitle, progressBar, controls)
+bottomDock.append(siteTitleWrap, progressBar, controls)
 app.appendChild(bottomDock)
+app.appendChild(easterEggToast)
 
 let playbackRate = 1.0
 let isSeeking = false
@@ -708,7 +718,43 @@ fileInput.addEventListener('change', () => {
   if (file) initAudio(URL.createObjectURL(file), false)
 })
 
-demoBtn.addEventListener('click', () => {
+// ============================================================
+// Easter egg: hidden demo music
+// ============================================================
+const EASTER_EGG_KEY = 'music-sun-easter-egg'
+const EASTER_EGG_TAPS = 5
+const EASTER_EGG_WINDOW = 2000 // ms — all taps must happen within this window
+let easterEggTaps: number[] = []
+let easterEggUnlocked = localStorage.getItem(EASTER_EGG_KEY) === '1'
+
+function unlockEasterEgg() {
+  easterEggUnlocked = true
+  localStorage.setItem(EASTER_EGG_KEY, '1')
+  easterEggBtn.classList.add('visible')
+  // Show discovery toast
+  easterEggToast.textContent = '🎵 你发现了隐藏曲目！'
+  easterEggToast.classList.add('show')
+  setTimeout(() => easterEggToast.classList.remove('show'), 3000)
+}
+
+// If already unlocked, show the button right away
+if (easterEggUnlocked) {
+  easterEggBtn.classList.add('visible')
+}
+
+siteTitle.addEventListener('click', () => {
+  const now = performance.now()
+  easterEggTaps.push(now)
+  // Keep only taps within the time window
+  easterEggTaps = easterEggTaps.filter(t => now - t < EASTER_EGG_WINDOW)
+
+  if (!easterEggUnlocked && easterEggTaps.length >= EASTER_EGG_TAPS) {
+    unlockEasterEgg()
+    easterEggTaps = []
+  }
+})
+
+easterEggBtn.addEventListener('click', () => {
   initAudio(import.meta.env.BASE_URL + 'YA1OvUaoVuc.mp3', true)
 })
 

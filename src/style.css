@@ -53,19 +53,6 @@ canvas {
   display: none;
 }
 
-#demo-btn {
-  opacity: 0;
-  pointer-events: none;
-  transform: translateX(-8px);
-  transition: opacity 0.3s, transform 0.3s;
-}
-
-#top-bar:hover #demo-btn {
-  opacity: 1;
-  pointer-events: auto;
-  transform: translateX(0);
-}
-
 /* Bottom dock: dark frosted glass panel behind controls */
 #bottom-dock {
   position: fixed;
@@ -87,12 +74,80 @@ canvas {
   gap: 14px;
 }
 
+#site-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 #site-title {
   color: rgba(255, 255, 255, 0.35);
   font-size: 12px;
   letter-spacing: 4px;
-  pointer-events: none;
   white-space: nowrap;
+  cursor: default;
+  user-select: none;
+  transition: text-shadow 0.4s;
+}
+
+#site-title:hover {
+  text-shadow: 0 0 8px rgba(255, 255, 255, 0.15);
+}
+
+#site-title:active {
+  color: rgba(255, 255, 255, 0.55);
+}
+
+#easter-egg-btn {
+  display: none;
+  padding: 2px 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 12px;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.3s, color 0.3s, transform 0.3s;
+  animation: egg-fadein 0.6s ease both;
+}
+
+#easter-egg-btn.visible {
+  display: inline-flex;
+}
+
+#easter-egg-btn:hover {
+  background: rgba(255, 255, 255, 0.18);
+  color: rgba(255, 255, 255, 0.85);
+  transform: scale(1.1);
+}
+
+@keyframes egg-fadein {
+  from { opacity: 0; transform: scale(0.5); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+#easter-egg-toast {
+  position: fixed;
+  bottom: 120px;
+  left: 50%;
+  transform: translateX(-50%) translateY(20px);
+  z-index: 50;
+  padding: 10px 24px;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 20px;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 14px;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.4s, transform 0.4s;
+}
+
+#easter-egg-toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
 }
 
 #controls {
